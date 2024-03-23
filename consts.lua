@@ -17,7 +17,7 @@ consts.upVector = vec3(0, 1, 0)
 consts.rightVector = vec3(1, 0, 0)
 
 consts.airDensity = 0.9
-consts.speedRegulationHarshness = 10e-10
+consts.speedRegulationHarshness = 1e-10
 consts.speedRegulationMultiplier = 1 - consts.speedRegulationHarshness
 
 return consts
