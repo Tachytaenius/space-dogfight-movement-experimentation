@@ -43,23 +43,23 @@ function love.load()
 		angularVelocity = vec3(),
 		radius = 2,
 
-		sidewaysAcceleration = 75,
-		forwardsAcceleration = 200,
-		backwardsAcceleration = 100,
+		sidewaysThrustForce = 7500,
+		forwardsThrustForce = 20000,
+		backwardsThrustForce = 10000,
 		maxSpeed = 200,
 		engineAccelerationCurveShaper = 1.5,
 
-		maxAngularAcceleration = 0.6,
+		angularForce = 50,
 		maxAngularSpeed = 1,
 		angularMovementTypeLerpFactor = 0.5,
 
 		drag = 0.3,
 		angularDrag = 0.25,
-		sidewaysVelocityDecelerationMax = 25,
+		sidewaysDecelerationForceMax = 2500,
 
 		mass = 100,
 
-		accelerationMultiplierMode = "1" -- Won't be using 2 but it was interesing to try
+		accelerationDampingMultiplierMode = "1" -- Won't be using 2 but it was interesing to try
 	}
 	ships = {}
 	ships[#ships + 1] = player
@@ -69,8 +69,8 @@ function love.load()
 end
 
 function love.update(dt)
-	-- Get inputs
 	if player then
+		-- Get inputs
 		local translation = vec3()
 		if love.keyboard.isDown(controls.moveLeft) then translation = translation + consts.rightVector end
 		if love.keyboard.isDown(controls.moveRight) then translation = translation - consts.rightVector end
@@ -78,7 +78,7 @@ function love.update(dt)
 		if love.keyboard.isDown(controls.moveDown) then translation = translation - consts.upVector end
 		if love.keyboard.isDown(controls.moveForwards) then translation = translation + consts.forwardVector end
 		if love.keyboard.isDown(controls.moveBackwards) then translation = translation - consts.forwardVector end
-		player.engineAcceleratorMultiplierVector = normaliseOrZero(translation) -- Scaled depending on direction of motion later
+		player.engineVectorShipSpace = normaliseOrZero(translation) -- Scaled by direction-dependant engine power later. This is a dimensionless multiplier
 
 		local rotation = vec3()
 		if love.keyboard.isDown(controls.yawLeft) then rotation = rotation - consts.upVector end
@@ -93,12 +93,12 @@ function love.update(dt)
 
 	-- Make inputs change things
 	for _, ship in ipairs(ships) do
-		-- TODO: Make everything in terms of force, not acceleration (consider mass of ship) (catch the TODO below about naming as well)
 		-- TODO: Braking
 		-- TODO: Drag and angular drag with consistent units
 		-- TODO: Direction-dependant max speed
 
 		-- Sideways deceleration
+		-- Split velocity into parallel and perpendicular components with respect to facing direction
 		local facingDirection = vec3.rotate(consts.forwardVector, ship.orientation)
 		local dot = vec3.dot( -- Dot of A with normalised B is A in direction of B
 			ship.velocity,
@@ -106,51 +106,57 @@ function love.update(dt)
 		)
 		local velocityParallel = dot * facingDirection
 		local velocityPerpendicular = ship.velocity - velocityParallel
-		local sidewaysDeceleration = love.keyboard.isDown(controls.sidewaysBrake) and ship.sidewaysVelocityDecelerationMax or 0
-		local velocityPerpendicularReduced = moveVectorToTarget(velocityPerpendicular, vec3(), sidewaysDeceleration, dt)
+		-- Get force as acceleration
+		local sidewaysDecelerationForce = love.keyboard.isDown(controls.sidewaysBrake) and ship.sidewaysDecelerationForceMax or 0
+		local sidewaysDeceleration = sidewaysDecelerationForce / ship.mass
+		-- Reduce perpendicular by acceleration
+		local velocityPerpendicularReduced = setVectorLength(
+			velocityPerpendicular,
+			math.max(0, #velocityPerpendicular - sidewaysDeceleration * dt)
+		)
+		-- Recombine
 		ship.velocity = velocityParallel + velocityPerpendicularReduced
 
-		-- TODO: The naming. Several things are named with acceleration without much clear separation
 		local accelerationVector
-		local engineAccelerationVector = ship.engineAcceleratorMultiplierVector * vec3(
-			ship.sidewaysAcceleration,
-			ship.sidewaysAcceleration,
-			ship.engineAcceleratorMultiplierVector.z > 0 and ship.forwardsAcceleration or ship.backwardsAcceleration
-		)
-		local engineAccelerationVectorWorldSpace = vec3.rotate(engineAccelerationVector, ship.orientation)
+		local preDampedEngineAccelerationShipSpace = ship.engineVectorShipSpace * vec3(
+			ship.sidewaysThrustForce,
+			ship.sidewaysThrustForce,
+			ship.engineVectorShipSpace.z > 0 and ship.forwardsThrustForce or ship.backwardsThrustForce
+		) / ship.mass
+		local preDampedEngineAccelerationWorldSpace = vec3.rotate(preDampedEngineAccelerationShipSpace, ship.orientation)
 		if #ship.velocity > 0 then
-			-- Split engine acceleration into parallel and perpendicular components with respect to velocity
+			-- Split pre-damped acceleration into parallel and perpendicular components with respect to velocity direction
 			local velocityDirection = vec3.normalise(ship.velocity)
 			local dot = vec3.dot(
-				engineAccelerationVectorWorldSpace,
+				preDampedEngineAccelerationWorldSpace,
 				velocityDirection
 			)
-			local accelerationParallel = dot * velocityDirection
-			local accelerationPerpendicular = engineAccelerationVectorWorldSpace - accelerationParallel
+			local preDampedAccelerationParallel = dot * velocityDirection
+			local accelerationPerpendicular = preDampedEngineAccelerationWorldSpace - preDampedAccelerationParallel
 
-			-- Get multiplier
-			local multiplier
-			if ship.accelerationMultiplierMode == "1" then
-				multiplier = getAccelerationMultiplier1(#ship.velocity, dot, ship.maxSpeed, ship.engineAccelerationCurveShaper)
-			elseif ship.accelerationMultiplierMode == "2" then
-				multiplier = getAccelerationMultiplier2(ship.velocity, engineAccelerationVectorWorldSpace, ship.maxSpeed, ship.engineAccelerationCurveShaper)
+			-- Get damping multiplier
+			local dampingMultiplier
+			if ship.accelerationDampingMultiplierMode == "1" then
+				dampingMultiplier = getAccelerationMultiplier1(#ship.velocity, dot, ship.maxSpeed, ship.engineAccelerationCurveShaper)
+			elseif ship.accelerationDampingMultiplierMode == "2" then
+				dampingMultiplier = getAccelerationMultiplier2(ship.velocity, preDampedEngineAccelerationWorldSpace, ship.maxSpeed, ship.engineAccelerationCurveShaper)
 			end
 
-			-- Multiply perpendicular component and recombine
-			local accelerationParallelMultiplied = accelerationParallel * multiplier
-			accelerationVector = (accelerationParallelMultiplied + accelerationPerpendicular)
+			-- Multiply parallel component and recombine
+			local dampedAccelerationParallel = preDampedAccelerationParallel * dampingMultiplier
+			accelerationVector = accelerationPerpendicular + dampedAccelerationParallel
 		else
-			accelerationVector = engineAccelerationVectorWorldSpace
+			accelerationVector = preDampedEngineAccelerationWorldSpace
 		end
 
 		-- If acceleration would increase speed while being over max speed, cap it to previous speed or max speed, whichever is higher. Preserves direction
 		local attemptedDelta = accelerationVector * dt
 		local attemptedNewVelocity = ship.velocity + attemptedDelta
 		local finalDelta, finalNewVelocity
-		if #attemptedNewVelocity > ship.maxSpeed and #attemptedNewVelocity > #ship.velocity then
+		if #attemptedNewVelocity > ship.maxSpeed and #attemptedNewVelocity > ship.velocity then
 			finalNewVelocity = setVectorLength(
 				attemptedNewVelocity,
-				math.max(ship.maxSpeed, #ship.velocity) * consts.speedRegulationMultiplier -- Speed regulation multiplier is there to stop precision from letting you go faster and faster
+				math.max(ship.maxSpeed, #ship.velocity) * consts.speedRegulationMultiplier -- Speed regulation multiplier is there to stop precision from letting you go faster and faster. It's a quantity a tiny bit below 1
 			)
 			finalDelta = finalNewVelocity - ship.velocity
 			-- #finalDelta may be larger than #attemptedDelta
@@ -159,13 +165,13 @@ function love.update(dt)
 			finalDelta = attemptedDelta
 			finalNewVelocity = attemptedNewVelocity
 		end
-		local dampedEngineAcceleration = finalDelta / dt -- If you want to draw an acceleration vector, use this
+		local dampedAcceleration = finalDelta / dt -- If you want to draw an acceleration vector, use this
 		ship.velocity = finalNewVelocity
 
 		ship.angularVelocity = moveVectorToTarget2(
 			ship.angularVelocity,
 			ship.targetAngularVelocityMultiplierVector * ship.maxAngularSpeed,
-			ship.maxAngularAcceleration,
+			ship.angularForce / ship.mass,
 			dt,
 			ship.angularMovementTypeLerpFactor
 		)
