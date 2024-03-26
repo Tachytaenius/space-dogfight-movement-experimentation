@@ -43,21 +43,23 @@ function love.load()
 		angularVelocity = vec3(),
 		radius = 2,
 
-		sidewaysThrustForce = 7500,
-		forwardsThrustForce = 20000,
-		backwardsThrustForce = 10000,
-		maxSpeed = 200,
+		sidewaysThrustForce = 75e4,
+		forwardsThrustForce = 200e4,
+		backwardsThrustForce = 100e4,
+		maxSpeed = 250,
 		engineAccelerationCurveShaper = 1.5,
 
-		angularForce = 50,
-		maxAngularSpeed = 1,
+		angularForce = 1.5e4,
+		maxAngularSpeed = 0.5,
 		angularMovementTypeLerpFactor = 0.5,
 
-		drag = 0.3,
+		dragCoefficient = 0.3,
+		dragArea = 100, -- Would depend on direction
 		angularDrag = 0.25,
-		sidewaysDecelerationForceMax = 2500,
+		sidewaysDecelerationForceMax = 25e4,
+		brakeForceMax = 100e4,
 
-		mass = 100,
+		mass = 1e4,
 
 		accelerationDampingMultiplierMode = "1" -- Won't be using 2 but it was interesing to try
 	}
@@ -93,9 +95,17 @@ function love.update(dt)
 
 	-- Make inputs change things
 	for _, ship in ipairs(ships) do
-		-- TODO: Braking
-		-- TODO: Drag and angular drag with consistent units
+		-- TODO: Angular drag with consistent units
 		-- TODO: Direction-dependant max speed
+		-- TODO: Angular speed-dependant max speed
+
+		-- Drag and braking
+		local speed = #player.velocity
+		local slowdownForce = 0
+		slowdownForce = slowdownForce + (love.keyboard.isDown("lshift") and ship.brakeForceMax or 0) -- Braking
+		slowdownForce = slowdownForce + 1/2 * consts.airDensity * speed ^ 2 * ship.dragCoefficient * ship.dragArea -- Drag
+		local slowdown = slowdownForce / ship.mass
+		player.velocity = setVectorLength(ship.velocity, math.max(0, #ship.velocity - slowdown * dt))
 
 		-- Sideways deceleration
 		-- Split velocity into parallel and perpendicular components with respect to facing direction
@@ -153,7 +163,7 @@ function love.update(dt)
 		local attemptedDelta = accelerationVector * dt
 		local attemptedNewVelocity = ship.velocity + attemptedDelta
 		local finalDelta, finalNewVelocity
-		if #attemptedNewVelocity > ship.maxSpeed and #attemptedNewVelocity > ship.velocity then
+		if #attemptedNewVelocity > ship.maxSpeed and #attemptedNewVelocity > #ship.velocity then
 			finalNewVelocity = setVectorLength(
 				attemptedNewVelocity,
 				math.max(ship.maxSpeed, #ship.velocity) * consts.speedRegulationMultiplier -- Speed regulation multiplier is there to stop precision from letting you go faster and faster. It's a quantity a tiny bit below 1
