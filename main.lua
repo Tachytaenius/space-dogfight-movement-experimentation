@@ -91,6 +91,9 @@ function love.update(dt)
 		if love.keyboard.isDown(controls.rollAnticlockwise) then rotation = rotation + consts.forwardVector end
 		-- TODO: Mouse
 		player.targetAngularVelocityMultiplierVector = normaliseOrZero(rotation)
+
+		player.brakeMultiplier = love.keyboard.isDown(controls.brake) and 1 or 0
+		player.sidewaysBrakeMultiplier = love.keyboard.isDown(controls.sidewaysBrake) and 1 or 0
 	end
 
 	-- Make inputs change things
@@ -102,7 +105,7 @@ function love.update(dt)
 		-- Drag and braking
 		local speed = #player.velocity
 		local slowdownForce = 0
-		slowdownForce = slowdownForce + (love.keyboard.isDown("lshift") and ship.brakeForceMax or 0) -- Braking
+		slowdownForce = slowdownForce + ship.brakeMultiplier * ship.brakeForceMax -- Braking
 		slowdownForce = slowdownForce + 1/2 * consts.airDensity * speed ^ 2 * ship.dragCoefficient * ship.dragArea -- Drag
 		local slowdown = slowdownForce / ship.mass
 		player.velocity = setVectorLength(ship.velocity, math.max(0, #ship.velocity - slowdown * dt))
@@ -117,7 +120,7 @@ function love.update(dt)
 		local velocityParallel = dot * facingDirection
 		local velocityPerpendicular = ship.velocity - velocityParallel
 		-- Get force as acceleration
-		local sidewaysDecelerationForce = love.keyboard.isDown(controls.sidewaysBrake) and ship.sidewaysDecelerationForceMax or 0
+		local sidewaysDecelerationForce = ship.sidewaysBrakeMultiplier * ship.sidewaysDecelerationForceMax
 		local sidewaysDeceleration = sidewaysDecelerationForce / ship.mass
 		-- Reduce perpendicular by acceleration
 		local velocityPerpendicularReduced = setVectorLength(
