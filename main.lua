@@ -21,6 +21,8 @@ local player
 local canvas, shader
 local loadObj = require("util.load-obj")
 
+local mouseDx, mouseDy
+
 function love.load()
 	sphereMesh = loadObj("meshes/icosahedron.obj").mesh
 	spheres = {}
@@ -70,27 +72,50 @@ function love.load()
 	shader = love.graphics.newShader("shaders/mesh.glsl")
 end
 
+function love.mousemoved(_, _, dx, dy)
+	mouseDx, mouseDy = dx, dy
+end
+
+function love.mousepressed()
+	love.mouse.setRelativeMode(not love.mouse.getRelativeMode())
+end
+
 function love.update(dt)
+	if not (mouseDx and mouseDy) or love.mouse.getRelativeMode() == false then
+		mouseDx = 0
+		mouseDy = 0
+	end
+
 	if player then
 		-- Get inputs
-		local translation = vec3()
-		if love.keyboard.isDown(controls.moveLeft) then translation = translation + consts.rightVector end
-		if love.keyboard.isDown(controls.moveRight) then translation = translation - consts.rightVector end
-		if love.keyboard.isDown(controls.moveUp) then translation = translation + consts.upVector end
-		if love.keyboard.isDown(controls.moveDown) then translation = translation - consts.upVector end
-		if love.keyboard.isDown(controls.moveForwards) then translation = translation + consts.forwardVector end
-		if love.keyboard.isDown(controls.moveBackwards) then translation = translation - consts.forwardVector end
-		player.engineVectorShipSpace = normaliseOrZero(translation) -- Scaled by direction-dependant engine power later. This is a dimensionless multiplier
+		local keyboardTranslation = vec3()
+		if love.keyboard.isDown(controls.moveLeft) then keyboardTranslation = keyboardTranslation + consts.rightVector end
+		if love.keyboard.isDown(controls.moveRight) then keyboardTranslation = keyboardTranslation - consts.rightVector end
+		if love.keyboard.isDown(controls.moveUp) then keyboardTranslation = keyboardTranslation + consts.upVector end
+		if love.keyboard.isDown(controls.moveDown) then keyboardTranslation = keyboardTranslation - consts.upVector end
+		if love.keyboard.isDown(controls.moveForwards) then keyboardTranslation = keyboardTranslation + consts.forwardVector end
+		if love.keyboard.isDown(controls.moveBackwards) then keyboardTranslation = keyboardTranslation - consts.forwardVector end
+		player.engineVectorShipSpace = normaliseOrZero(keyboardTranslation) -- Scaled by direction-dependant engine power later. This is a dimensionless multiplier
 
-		local rotation = vec3()
-		if love.keyboard.isDown(controls.yawLeft) then rotation = rotation - consts.upVector end
-		if love.keyboard.isDown(controls.yawRight) then rotation = rotation + consts.upVector end
-		if love.keyboard.isDown(controls.pitchUp) then rotation = rotation - consts.rightVector end
-		if love.keyboard.isDown(controls.pitchDown) then rotation = rotation + consts.rightVector end
-		if love.keyboard.isDown(controls.rollClockwise) then rotation = rotation - consts.forwardVector end
-		if love.keyboard.isDown(controls.rollAnticlockwise) then rotation = rotation + consts.forwardVector end
-		-- TODO: Mouse
-		player.targetAngularVelocityMultiplierVector = normaliseOrZero(rotation)
+		local mouseMovementForMaxRotationInputCursorLength = 40 -- Move this amount to go move rotationInputCursor's magnitude from 0 to 1
+		player.rotationInputCursor = limitVectorLength(
+			(player.rotationInputCursor or vec3()) + -- Will never have anything on the z axis
+				consts.upVector * mouseDx / mouseMovementForMaxRotationInputCursorLength +
+				consts.rightVector * mouseDy / mouseMovementForMaxRotationInputCursorLength,
+			1
+		)
+		if love.keyboard.isDown(controls.recentreRotationCursor) then
+			player.rotationInputCursor = vec3()
+		end
+
+		local keyboardRotation = vec3()
+		if love.keyboard.isDown(controls.yawLeft) then keyboardRotation = keyboardRotation - consts.upVector end
+		if love.keyboard.isDown(controls.yawRight) then keyboardRotation = keyboardRotation + consts.upVector end
+		if love.keyboard.isDown(controls.pitchUp) then keyboardRotation = keyboardRotation - consts.rightVector end
+		if love.keyboard.isDown(controls.pitchDown) then keyboardRotation = keyboardRotation + consts.rightVector end
+		if love.keyboard.isDown(controls.rollClockwise) then keyboardRotation = keyboardRotation - consts.forwardVector end
+		if love.keyboard.isDown(controls.rollAnticlockwise) then keyboardRotation = keyboardRotation + consts.forwardVector end
+		player.targetAngularVelocityMultiplierVector = limitVectorLength(normaliseOrZero(keyboardRotation) + player.rotationInputCursor, 1)
 
 		player.brakeMultiplier = love.keyboard.isDown(controls.brake) and 1 or 0
 		player.sidewaysBrakeMultiplier = love.keyboard.isDown(controls.sidewaysBrake) and 1 or 0
@@ -194,6 +219,8 @@ function love.update(dt)
 		ship.position = ship.position + ship.velocity * dt
 		ship.orientation = quat.normalise(ship.orientation * quat.fromAxisAngle(ship.angularVelocity * dt))
 	end
+
+	mouseDx, mouseDy = nil, nil
 end
 
 function love.draw()

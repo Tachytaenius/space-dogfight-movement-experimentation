@@ -14,7 +14,8 @@ local controls = {
 	rollAnticlockwise = "u",
 
 	brake = "lshift",
-	sidewaysBrake = "lalt"
+	sidewaysBrake = "lalt",
+	recentreRotationCursor = "c"
 }
 
 return controls
