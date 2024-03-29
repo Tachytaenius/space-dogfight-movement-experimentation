@@ -45,10 +45,12 @@ function love.load()
 		angularVelocity = vec3(),
 		radius = 2,
 
-		sidewaysThrustForce = 75e4,
 		forwardsThrustForce = 200e4,
 		backwardsThrustForce = 100e4,
-		maxSpeed = 250,
+		sidewaysThrustForce = 75e4,
+		forwardsMaxSpeed = 250,
+		backwardsMaxSpeed = 150,
+		sidewaysMaxSpeed = 75,
 		engineAccelerationCurveShaper = 1.5,
 
 		angularForce = 1.5e4,
@@ -124,16 +126,15 @@ function love.update(dt)
 	-- Make inputs change things
 	for _, ship in ipairs(ships) do
 		-- TODO: Angular drag with consistent units
-		-- TODO: Direction-dependant max speed
-		-- TODO: Angular speed-dependant max speed
+		-- TODO: Speed-dependent angular acceleration/max speed
 
 		-- Drag and braking
-		local speed = #player.velocity
+		local speed = #ship.velocity
 		local slowdownForce = 0
 		slowdownForce = slowdownForce + ship.brakeMultiplier * ship.brakeForceMax -- Braking
 		slowdownForce = slowdownForce + 1/2 * consts.airDensity * speed ^ 2 * ship.dragCoefficient * ship.dragArea -- Drag
 		local slowdown = slowdownForce / ship.mass
-		player.velocity = setVectorLength(ship.velocity, math.max(0, #ship.velocity - slowdown * dt))
+		ship.velocity = setVectorLength(ship.velocity, math.max(0, #ship.velocity - slowdown * dt))
 
 		-- Sideways deceleration
 		-- Split velocity into parallel and perpendicular components with respect to facing direction
@@ -155,6 +156,8 @@ function love.update(dt)
 		-- Recombine
 		ship.velocity = velocityParallel + velocityPerpendicularReduced
 
+		-- Engine acceleration
+		-- Get pre-damped acceleration in world space
 		local accelerationVector
 		local preDampedEngineAccelerationShipSpace = ship.engineVectorShipSpace * vec3(
 			ship.sidewaysThrustForce,
@@ -162,6 +165,16 @@ function love.update(dt)
 			ship.engineVectorShipSpace.z > 0 and ship.forwardsThrustForce or ship.backwardsThrustForce
 		) / ship.mass
 		local preDampedEngineAccelerationWorldSpace = vec3.rotate(preDampedEngineAccelerationShipSpace, ship.orientation)
+		-- Get max speed for this direction
+		local maxSpeedThisDirection = #vec3.rotate(
+			normaliseOrZero(ship.engineVectorShipSpace) * vec3(
+				ship.sidewaysMaxSpeed,
+				ship.sidewaysMaxSpeed,
+				ship.engineVectorShipSpace.z > 0 and ship.forwardsMaxSpeed or ship.backwardsMaxSpeed
+			),
+			ship.orientation
+		)
+		-- Get damped acceleration vector
 		if #ship.velocity > 0 then
 			-- Split pre-damped acceleration into parallel and perpendicular components with respect to velocity direction
 			local velocityDirection = vec3.normalise(ship.velocity)
@@ -175,9 +188,9 @@ function love.update(dt)
 			-- Get damping multiplier
 			local dampingMultiplier
 			if ship.accelerationDampingMultiplierMode == "1" then
-				dampingMultiplier = getAccelerationMultiplier1(#ship.velocity, dot, ship.maxSpeed, ship.engineAccelerationCurveShaper)
+				dampingMultiplier = getAccelerationMultiplier1(#ship.velocity, dot, maxSpeedThisDirection, ship.engineAccelerationCurveShaper)
 			elseif ship.accelerationDampingMultiplierMode == "2" then
-				dampingMultiplier = getAccelerationMultiplier2(ship.velocity, preDampedEngineAccelerationWorldSpace, ship.maxSpeed, ship.engineAccelerationCurveShaper)
+				dampingMultiplier = getAccelerationMultiplier2(ship.velocity, preDampedEngineAccelerationWorldSpace, maxSpeedThisDirection, ship.engineAccelerationCurveShaper)
 			end
 
 			-- Multiply parallel component and recombine
@@ -186,15 +199,14 @@ function love.update(dt)
 		else
 			accelerationVector = preDampedEngineAccelerationWorldSpace
 		end
-
 		-- If acceleration would increase speed while being over max speed, cap it to previous speed or max speed, whichever is higher. Preserves direction
 		local attemptedDelta = accelerationVector * dt
 		local attemptedNewVelocity = ship.velocity + attemptedDelta
 		local finalDelta, finalNewVelocity
-		if #attemptedNewVelocity > ship.maxSpeed and #attemptedNewVelocity > #ship.velocity then
+		if #attemptedNewVelocity > maxSpeedThisDirection and #attemptedNewVelocity > #ship.velocity then
 			finalNewVelocity = setVectorLength(
 				attemptedNewVelocity,
-				math.max(ship.maxSpeed, #ship.velocity) * consts.speedRegulationMultiplier -- Speed regulation multiplier is there to stop precision from letting you go faster and faster. It's a quantity a tiny bit below 1
+				math.max(maxSpeedThisDirection, #ship.velocity) * consts.speedRegulationMultiplier -- Speed regulation multiplier is there to stop precision from letting you go faster and faster. It's a quantity a tiny bit below 1
 			)
 			finalDelta = finalNewVelocity - ship.velocity
 			-- #finalDelta may be larger than #attemptedDelta
@@ -247,24 +259,24 @@ function love.draw()
 
 	local playerFacingVector = vec3.rotate(consts.forwardVector, player.orientation)
 	love.graphics.print(
-			"Speed: " .. math.floor(#player.velocity + 0.5) .. "\n" ..
-			"Forward velocity: " .. math.floor(vec3.dot(player.velocity, playerFacingVector) + 0.5) .. "\n" ..
-			"Velocity to facing angle difference: " .. (
-				#player.velocity > 0 and
-					math.floor(
-						math.acos(
-							math.max(-1, math.min(1,
-								vec3.dot(
-									vec3.normalise(player.velocity),
-									playerFacingVector
-								)
-							))
-						)
-						/ (consts.tau / 2) * 100 + 0.5
-					) .. "%"
-				or
-					"N/A"
-			) .. "\n" ..
-			"Angular speed: " .. math.floor(#player.angularVelocity * 1000 + 0.5) / 1000
-		)
+		"Speed: " .. math.floor(#player.velocity + 0.5) .. "\n" ..
+		"Forward velocity: " .. math.floor(vec3.dot(player.velocity, playerFacingVector) + 0.5) .. "\n" ..
+		"Velocity to facing angle difference: " .. (
+			#player.velocity > 0 and
+				math.floor(
+					math.acos(
+						math.max(-1, math.min(1,
+							vec3.dot(
+								vec3.normalise(player.velocity),
+								playerFacingVector
+							)
+						))
+					)
+					/ (consts.tau / 2) * 100 + 0.5
+				) .. "%"
+			or
+				"N/A"
+		) .. "\n" ..
+		"Angular speed: " .. math.floor(#player.angularVelocity * 1000 + 0.5) / 1000
+	)
 end
