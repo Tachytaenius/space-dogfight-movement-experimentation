@@ -1,3 +1,6 @@
+-- TODO: Angular drag with consistent units. Implement a more sensible idea of angular force, too?
+-- TODO: Speed-dependent angular acceleration/max speed
+
 local mathsies = require("lib.mathsies")
 local vec3 = mathsies.vec3
 local quat = mathsies.quat
@@ -125,9 +128,6 @@ function love.update(dt)
 
 	-- Make inputs change things
 	for _, ship in ipairs(ships) do
-		-- TODO: Angular drag with consistent units
-		-- TODO: Speed-dependent angular acceleration/max speed
-
 		-- Drag and braking
 		local speed = #ship.velocity
 		local slowdownForce = 0
