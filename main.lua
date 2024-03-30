@@ -1,5 +1,6 @@
 -- TODO: Angular drag with consistent units. Implement a more sensible idea of angular force, too?
--- TODO: Speed-dependent angular acceleration/max speed
+-- TODO: Smooth out rotation effect multiplier for better feel
+-- TODO: Automatic forward thrust with throttle
 
 local mathsies = require("lib.mathsies")
 local vec3 = mathsies.vec3
@@ -17,6 +18,7 @@ local moveVectorToTarget = require("util.move-vector-to-target")
 local setVectorLength = require("util.set-vector-length")
 local limitVectorLength = require("util.limit-vector-length")
 local moveVectorToTarget2 = require("util.move-vector-to-target-2")
+local lerp = require("util.lerp")
 
 local spheres, sphereMesh
 local ships, shipMesh
@@ -59,6 +61,23 @@ function love.load()
 		angularForce = 1.5e4,
 		maxAngularSpeed = 0.5,
 		angularMovementTypeLerpFactor = 0.5,
+		useRotationEffectMultiplier = true, -- Else make all the values below in this group nil
+		-- The rotation effect multiplier multiplies your max angular speed and angular force depending on your linear speed's distance to an optimum speed.
+		-- It is a plateau at 1 within a region around the optimum speed, decreases towards the lowest value within a larger region around the plateau at 1,
+		-- and is always at the lowest value outside the larger region. The two width parameters are the width of the regions from left side to right, not
+		-- from one side to the middle.
+		--[=[
+			|         /-----\
+			|        /       \
+			|       /         \
+			|------/           \------
+			|
+			+-------------------------
+		]=]
+		lowestRotationEffectMultiplier = 0.5,
+		rotationEffectMultiplierOptimumSpeed = 150,
+		rotationEffectMultiplierOptimumSpeedRegionWidth = 5,
+		rotationEffectMultiplierFalloffRegionWidth = 150,
 
 		dragCoefficient = 0.3,
 		dragArea = 100, -- Would depend on direction
@@ -218,10 +237,42 @@ function love.update(dt)
 		local dampedAcceleration = finalDelta / dt -- If you want to draw an acceleration vector, use this
 		ship.velocity = finalNewVelocity
 
+		-- Rotaion
+		-- Get effect multiplier
+		local rotationEffectMultiplier
+		if ship.useRotationEffectMultiplier then
+			assert(
+				ship.rotationEffectMultiplierOptimumSpeedRegionWidth <= ship.rotationEffectMultiplierFalloffRegionWidth,
+				"Ship rotationEffectMultiplierOptimumSpeedRegionWidth can't be greater than rotationEffectMultiplierFalloffRegionWidth"
+			)
+			local speedDistance = math.abs(#ship.velocity - ship.rotationEffectMultiplierOptimumSpeed)
+			if ship.rotationEffectMultiplierOptimumSpeedRegionWidth == ship.rotationEffectMultiplierFalloffRegionWidth then
+				-- Avoid dividing by zero
+				rotationEffectMultiplier = speedDistance > ship.rotationEffectMultiplierOptimumSpeedRegionWidth and 1 or ship.lowestRotationEffectMultiplier
+			else
+				-- This expression was made using Desmos to get the right function and then WolframAlpha to simplify the expression
+				rotationEffectMultiplier = math.max(ship.lowestRotationEffectMultiplier, math.min(1,
+					(
+						ship.rotationEffectMultiplierOptimumSpeedRegionWidth * ship.lowestRotationEffectMultiplier
+						- ship.rotationEffectMultiplierFalloffRegionWidth
+						-- The 2 here is responsible for makin the region width variables describe the width of the function regions from left side to right side, rather than from side to middle
+						- 2 * (ship.lowestRotationEffectMultiplier - 1) * speedDistance
+					)
+					/ (ship.rotationEffectMultiplierOptimumSpeedRegionWidth - ship.rotationEffectMultiplierFalloffRegionWidth)
+				))
+			end
+		else
+			rotationEffectMultiplier = 1
+		end
+		-- Multiply affected ship stats by effect multiplier
+		local effectiveMaxAngularSpeed = ship.maxAngularSpeed * rotationEffectMultiplier
+		local effectiveAngularForce = ship.angularForce * rotationEffectMultiplier
+		-- Move angular velocity vector using effect multiplier on affected ship stats
+		print(rotationEffectMultiplier)
 		ship.angularVelocity = moveVectorToTarget2(
 			ship.angularVelocity,
-			ship.targetAngularVelocityMultiplierVector * ship.maxAngularSpeed,
-			ship.angularForce / ship.mass,
+			ship.targetAngularVelocityMultiplierVector * effectiveMaxAngularSpeed,
+			effectiveAngularForce / ship.mass,
 			dt,
 			ship.angularMovementTypeLerpFactor
 		)
