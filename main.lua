@@ -59,27 +59,32 @@ function love.load()
 		sidewaysMaxSpeed = 75,
 		engineAccelerationCurveShaper = 1.5,
 
-		angularForce = 1.5e4,
-		maxAngularSpeed = 0.5,
+		angularForce = 2e4,
+		maxAngularSpeed = 1,
 		angularMovementTypeLerpFactor = 0.5,
+
 		useRotationEffectMultiplier = true, -- Else make all the values below in this group nil
 		-- The rotation effect multiplier multiplies your max angular speed and angular force depending on your linear speed's distance to an optimum speed.
-		-- It is a plateau at 1 within a region around the optimum speed, decreases towards the lowest value within a larger region around the plateau at 1,
-		-- and is always at the lowest value outside the larger region. The two width parameters are the width of the regions from left side to right, not
-		-- from one side to the middle. The rotation effect multiplier also changes over time from a current value to a target value from the function, for feel.
+		-- For the sake of feel, it moves from a current value to a target value over time. The target is at 1 at the optimum speed. Below the optimum speed,
+		-- there is a distance where it is still 1 (making a plateau), after which it descends towards the minimum value, which it meets at the specified
+		-- distance from the optimum speed. The same is true for above the optimum speed, but the distances and minimum value can be different.
 		--[=[
-			|         /-----\
-			|        /       \
-			|       /         \
-			|------/           \------
+			|          _____
+			|         /     \_
+			|        /        \_
+			|       /           \________
+			|______/
 			|
-			+-------------------------
+			+----------------------------
 		]=]
-		lowestRotationEffectMultiplier = 0.3,
 		rotationEffectMultiplierOptimumSpeed = 100,
-		rotationEffectMultiplierOptimumSpeedRegionWidth = 5,
-		rotationEffectMultiplierFalloffRegionWidth = 175,
-		rotationEffectMultiplierChangeRate = 0.75, -- nil for instant
+		lowestRotationEffectMultiplierBelow = 0.1,
+		rotationEffectMultiplierFalloffEndBelow = 50,
+		rotationEffectMultiplierPlateauRangeBelow = 10,
+		lowestRotationEffectMultiplierAbove = 0.5,
+		rotationEffectMultiplierFalloffEndAbove = 50,
+		rotationEffectMultiplierPlateauRangeAbove = 10,
+		rotationEffectMultiplierChangeRate = 0.5, -- nil for instant
 		currentRotationEffectMultiplier = nil,
 
 		dragCoefficient = 0.3,
@@ -244,24 +249,27 @@ function love.update(dt)
 		-- Get target effect multiplier
 		local targetRotationEffectMultiplier
 		if ship.useRotationEffectMultiplier then
+			local speedDifference = #ship.velocity - ship.rotationEffectMultiplierOptimumSpeed
+			local optimumDistance = speedDifference > 0 and ship.rotationEffectMultiplierPlateauRangeAbove or ship.rotationEffectMultiplierPlateauRangeBelow
+			local falloffEnd = speedDifference > 0 and ship.rotationEffectMultiplierFalloffEndAbove or ship.rotationEffectMultiplierFalloffEndBelow
+			local lowest = speedDifference > 0 and ship.lowestRotationEffectMultiplierAbove or ship.lowestRotationEffectMultiplierBelow
+			local speedDistance = math.abs(speedDifference)
 			assert(
-				ship.rotationEffectMultiplierOptimumSpeedRegionWidth <= ship.rotationEffectMultiplierFalloffRegionWidth,
-				"Ship rotationEffectMultiplierOptimumSpeedRegionWidth can't be greater than rotationEffectMultiplierFalloffRegionWidth"
+				optimumDistance <= falloffEnd,
+				"Optimum plateau distance can't be greater than falloff end distance"
 			)
-			local speedDistance = math.abs(#ship.velocity - ship.rotationEffectMultiplierOptimumSpeed)
-			if ship.rotationEffectMultiplierOptimumSpeedRegionWidth == ship.rotationEffectMultiplierFalloffRegionWidth then
+			if optimumDistance == falloffEnd then
 				-- Avoid dividing by zero
-				targetRotationEffectMultiplier = speedDistance > ship.rotationEffectMultiplierOptimumSpeedRegionWidth and 1 or ship.lowestRotationEffectMultiplier
+				targetRotationEffectMultiplier = speedDistance < optimumDistance and 1 or lowest
 			else
 				-- This expression was made using Desmos to get the right function and then WolframAlpha to simplify the expression
-				targetRotationEffectMultiplier = math.max(ship.lowestRotationEffectMultiplier, math.min(1,
+				targetRotationEffectMultiplier = math.max(lowest, math.min(1,
 					(
-						ship.rotationEffectMultiplierOptimumSpeedRegionWidth * ship.lowestRotationEffectMultiplier
-						- ship.rotationEffectMultiplierFalloffRegionWidth
-						-- The 2 here is responsible for makin the region width variables describe the width of the function regions from left side to right side, rather than from side to middle
-						- 2 * (ship.lowestRotationEffectMultiplier - 1) * speedDistance
+						optimumDistance * lowest
+						- falloffEnd
+						- (lowest - 1) * speedDistance
 					)
-					/ (ship.rotationEffectMultiplierOptimumSpeedRegionWidth - ship.rotationEffectMultiplierFalloffRegionWidth)
+					/ (optimumDistance - falloffEnd)
 				))
 			end
 		else
