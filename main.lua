@@ -19,6 +19,7 @@ local setVectorLength = require("util.set-vector-length")
 local limitVectorLength = require("util.limit-vector-length")
 local moveVectorToTarget2 = require("util.move-vector-to-target-2")
 local lerp = require("util.lerp")
+local sign = require("util.sign")
 
 local spheres, sphereMesh
 local ships, shipMesh
@@ -65,7 +66,7 @@ function love.load()
 		-- The rotation effect multiplier multiplies your max angular speed and angular force depending on your linear speed's distance to an optimum speed.
 		-- It is a plateau at 1 within a region around the optimum speed, decreases towards the lowest value within a larger region around the plateau at 1,
 		-- and is always at the lowest value outside the larger region. The two width parameters are the width of the regions from left side to right, not
-		-- from one side to the middle.
+		-- from one side to the middle. The rotation effect multiplier also changes over time from a current value to a target value from the function, for feel.
 		--[=[
 			|         /-----\
 			|        /       \
@@ -74,10 +75,12 @@ function love.load()
 			|
 			+-------------------------
 		]=]
-		lowestRotationEffectMultiplier = 0.5,
-		rotationEffectMultiplierOptimumSpeed = 150,
+		lowestRotationEffectMultiplier = 0.3,
+		rotationEffectMultiplierOptimumSpeed = 100,
 		rotationEffectMultiplierOptimumSpeedRegionWidth = 5,
-		rotationEffectMultiplierFalloffRegionWidth = 150,
+		rotationEffectMultiplierFalloffRegionWidth = 175,
+		rotationEffectMultiplierChangeRate = 0.75, -- nil for instant
+		currentRotationEffectMultiplier = nil,
 
 		dragCoefficient = 0.3,
 		dragArea = 100, -- Would depend on direction
@@ -238,8 +241,8 @@ function love.update(dt)
 		ship.velocity = finalNewVelocity
 
 		-- Rotaion
-		-- Get effect multiplier
-		local rotationEffectMultiplier
+		-- Get target effect multiplier
+		local targetRotationEffectMultiplier
 		if ship.useRotationEffectMultiplier then
 			assert(
 				ship.rotationEffectMultiplierOptimumSpeedRegionWidth <= ship.rotationEffectMultiplierFalloffRegionWidth,
@@ -248,10 +251,10 @@ function love.update(dt)
 			local speedDistance = math.abs(#ship.velocity - ship.rotationEffectMultiplierOptimumSpeed)
 			if ship.rotationEffectMultiplierOptimumSpeedRegionWidth == ship.rotationEffectMultiplierFalloffRegionWidth then
 				-- Avoid dividing by zero
-				rotationEffectMultiplier = speedDistance > ship.rotationEffectMultiplierOptimumSpeedRegionWidth and 1 or ship.lowestRotationEffectMultiplier
+				targetRotationEffectMultiplier = speedDistance > ship.rotationEffectMultiplierOptimumSpeedRegionWidth and 1 or ship.lowestRotationEffectMultiplier
 			else
 				-- This expression was made using Desmos to get the right function and then WolframAlpha to simplify the expression
-				rotationEffectMultiplier = math.max(ship.lowestRotationEffectMultiplier, math.min(1,
+				targetRotationEffectMultiplier = math.max(ship.lowestRotationEffectMultiplier, math.min(1,
 					(
 						ship.rotationEffectMultiplierOptimumSpeedRegionWidth * ship.lowestRotationEffectMultiplier
 						- ship.rotationEffectMultiplierFalloffRegionWidth
@@ -262,13 +265,26 @@ function love.update(dt)
 				))
 			end
 		else
-			rotationEffectMultiplier = 1
+			targetRotationEffectMultiplier = 1
 		end
-		-- Multiply affected ship stats by effect multiplier
-		local effectiveMaxAngularSpeed = ship.maxAngularSpeed * rotationEffectMultiplier
-		local effectiveAngularForce = ship.angularForce * rotationEffectMultiplier
+		-- Move current effect multiplier to target
+		if ship.rotationEffectMultiplierChangeRate then
+			ship.currentRotationEffectMultiplier = ship.currentRotationEffectMultiplier or targetRotationEffectMultiplier -- Sensible default
+			local delta = targetRotationEffectMultiplier - ship.currentRotationEffectMultiplier
+			ship.currentRotationEffectMultiplier =
+				targetRotationEffectMultiplier
+				- sign(delta)
+				* math.max(
+					0,
+					math.abs(delta) - ship.rotationEffectMultiplierChangeRate * dt
+				)
+		else
+			ship.currentRotationEffectMultiplier = targetRotationEffectMultiplier
+		end
+		-- Multiply affected ship stats by current effect multiplier
+		local effectiveMaxAngularSpeed = ship.maxAngularSpeed * ship.currentRotationEffectMultiplier
+		local effectiveAngularForce = ship.angularForce * ship.currentRotationEffectMultiplier
 		-- Move angular velocity vector using effect multiplier on affected ship stats
-		print(rotationEffectMultiplier)
 		ship.angularVelocity = moveVectorToTarget2(
 			ship.angularVelocity,
 			ship.targetAngularVelocityMultiplierVector * effectiveMaxAngularSpeed,
@@ -328,6 +344,7 @@ function love.draw()
 			or
 				"N/A"
 		) .. "\n" ..
-		"Angular speed: " .. math.floor(#player.angularVelocity * 1000 + 0.5) / 1000
+		"Angular speed: " .. math.floor(#player.angularVelocity * 1000 + 0.5) / 1000 .. "\n" ..
+		"Rotation effect multiplier: " .. math.floor(player.currentRotationEffectMultiplier * 1000 + 0.5) / 1000
 	)
 end
