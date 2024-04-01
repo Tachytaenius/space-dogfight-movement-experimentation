@@ -63,28 +63,13 @@ function love.load()
 		maxAngularSpeed = 1,
 		angularMovementTypeLerpFactor = 0.5,
 
-		useRotationEffectMultiplier = true, -- Else make all the values below in this group nil
-		-- The rotation effect multiplier multiplies your max angular speed and angular force depending on your linear speed's distance to an optimum speed.
-		-- For the sake of feel, it moves from a current value to a target value over time. The target is at 1 at the optimum speed. Below the optimum speed,
-		-- there is a distance where it is still 1 (making a plateau), after which it descends towards the minimum value, which it meets at the specified
-		-- distance from the optimum speed. The same is true for above the optimum speed, but the distances and minimum value can be different.
-		--[=[
-			|          _____
-			|         /     \_
-			|        /        \_
-			|       /           \________
-			|______/
-			|
-			+----------------------------
-		]=]
-		rotationEffectMultiplierOptimumSpeed = 100,
-		lowestRotationEffectMultiplierBelow = 0.1,
-		rotationEffectMultiplierFalloffEndBelow = 50,
-		rotationEffectMultiplierPlateauRangeBelow = 10,
-		lowestRotationEffectMultiplierAbove = 0.5,
-		rotationEffectMultiplierFalloffEndAbove = 50,
-		rotationEffectMultiplierPlateauRangeAbove = 10,
-		rotationEffectMultiplierChangeRate = 0.5, -- nil for instant
+		rotationEffectMultiplierOptimumSpeed = 125,
+		lowestRotationEffectMultiplierBelow = 0.25,
+		rotationEffectMultiplierFalloffRangeBelow = 75,
+		lowestRotationEffectMultiplierAbove = 0.375,
+		rotationEffectMultiplierFalloffRangeAbove = 50,
+		rotationEffectMultiplierBaseChangeRate = 0.01, -- nil for instant
+		rotationEffectMultiplierDistanceToRateMultiplier = 3,
 		currentRotationEffectMultiplier = nil,
 
 		dragCoefficient = 0.3,
@@ -247,44 +232,36 @@ function love.update(dt)
 
 		-- Rotaion
 		-- Get target effect multiplier
-		local targetRotationEffectMultiplier
-		if ship.useRotationEffectMultiplier then
-			local speedDifference = #ship.velocity - ship.rotationEffectMultiplierOptimumSpeed
-			local optimumDistance = speedDifference > 0 and ship.rotationEffectMultiplierPlateauRangeAbove or ship.rotationEffectMultiplierPlateauRangeBelow
-			local falloffEnd = speedDifference > 0 and ship.rotationEffectMultiplierFalloffEndAbove or ship.rotationEffectMultiplierFalloffEndBelow
-			local lowest = speedDifference > 0 and ship.lowestRotationEffectMultiplierAbove or ship.lowestRotationEffectMultiplierBelow
-			local speedDistance = math.abs(speedDifference)
-			assert(
-				optimumDistance <= falloffEnd,
-				"Optimum plateau distance can't be greater than falloff end distance"
-			)
-			if optimumDistance == falloffEnd then
-				-- Avoid dividing by zero
-				targetRotationEffectMultiplier = speedDistance < optimumDistance and 1 or lowest
-			else
-				-- This expression was made using Desmos to get the right function and then WolframAlpha to simplify the expression
-				targetRotationEffectMultiplier = math.max(lowest, math.min(1,
-					(
-						optimumDistance * lowest
-						- falloffEnd
-						- (lowest - 1) * speedDistance
-					)
-					/ (optimumDistance - falloffEnd)
-				))
-			end
+		local speedDifference = #ship.velocity - ship.rotationEffectMultiplierOptimumSpeed
+		local range, lowest
+		if speedDifference > 0 then
+			range = ship.rotationEffectMultiplierFalloffRangeAbove
+			lowest = ship.lowestRotationEffectMultiplierAbove
 		else
-			targetRotationEffectMultiplier = 1
+			range = ship.rotationEffectMultiplierFalloffRangeBelow
+			lowest = ship.lowestRotationEffectMultiplierBelow
+		end
+		local speedDistance = math.abs(speedDifference)
+		local targetRotationEffectMultiplier
+		if range == 0 then
+			-- Avoid dividing by zero
+			targetRotationEffectMultiplier = speedDistance <= range and 1 or lowest
+		else
+			targetRotationEffectMultiplier = math.max(lowest, math.min(1,
+				(lowest - 1) *  speedDistance / range + 1
+			))
 		end
 		-- Move current effect multiplier to target
-		if ship.rotationEffectMultiplierChangeRate then
+		if ship.rotationEffectMultiplierBaseChangeRate then
 			ship.currentRotationEffectMultiplier = ship.currentRotationEffectMultiplier or targetRotationEffectMultiplier -- Sensible default
 			local delta = targetRotationEffectMultiplier - ship.currentRotationEffectMultiplier
+			local finalRate = ship.rotationEffectMultiplierBaseChangeRate + math.abs(delta) * ship.rotationEffectMultiplierDistanceToRateMultiplier
 			ship.currentRotationEffectMultiplier =
 				targetRotationEffectMultiplier
 				- sign(delta)
 				* math.max(
 					0,
-					math.abs(delta) - ship.rotationEffectMultiplierChangeRate * dt
+					math.abs(delta) - finalRate * dt
 				)
 		else
 			ship.currentRotationEffectMultiplier = targetRotationEffectMultiplier
