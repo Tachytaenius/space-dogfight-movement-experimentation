@@ -311,6 +311,7 @@ function love.draw()
 
 	local playerFacingVector = vec3.rotate(consts.forwardVector, player.orientation)
 	love.graphics.print(
+		"FPS: " .. love.timer.getFPS() .. "\n" ..
 		"Speed: " .. math.floor(#player.velocity + 0.5) .. "\n" ..
 		"Forward velocity: " .. math.floor(vec3.dot(player.velocity, playerFacingVector) + 0.5) .. "\n" ..
 		"Velocity to facing angle difference: " .. (
