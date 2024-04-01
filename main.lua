@@ -51,12 +51,13 @@ function love.load()
 		angularVelocity = vec3(),
 		radius = 2,
 
-		forwardsThrustForce = 200e4,
-		backwardsThrustForce = 100e4,
+		forwardsThrustForce = 125e4,
+		backwardsThrustForce = 75e4,
 		sidewaysThrustForce = 75e4,
-		forwardsMaxSpeed = 250,
-		backwardsMaxSpeed = 150,
-		sidewaysMaxSpeed = 75,
+		-- Max speeds can be unreachable due to drag, but still affect the curve of acceleration
+		forwardsMaxSpeed = 400,
+		backwardsMaxSpeed = 300,
+		sidewaysMaxSpeed = 150,
 		engineAccelerationCurveShaper = 1.5,
 
 		angularForce = 2e4,
@@ -70,7 +71,7 @@ function love.load()
 		rotationEffectMultiplierFalloffRangeAbove = 50,
 		rotationEffectMultiplierBaseChangeRate = 0.01, -- nil for instant
 		rotationEffectMultiplierDistanceToRateMultiplier = 3,
-		currentRotationEffectMultiplier = nil,
+		currentRotationEffectMultiplier = nil, -- Initialised by initial speed
 
 		dragCoefficient = 0.3,
 		dragArea = 100, -- Would depend on direction
