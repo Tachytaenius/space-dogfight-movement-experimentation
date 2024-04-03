@@ -17,7 +17,7 @@ local axisAngleVectorBetweenVectors = require("util.axis-angle-between-vectors")
 local moveVectorToTarget = require("util.move-vector-to-target")
 local setVectorLength = require("util.set-vector-length")
 local limitVectorLength = require("util.limit-vector-length")
-local moveVectorToTarget2 = require("util.move-vector-to-target-2")
+local handleVelocityVector = require("util.handle-velocity-vector")
 local lerp = require("util.lerp")
 local sign = require("util.sign")
 
@@ -28,6 +28,26 @@ local canvas, shader
 local loadObj = require("util.load-obj")
 
 local mouseDx, mouseDy
+
+local function getTargetRotationEffectMultiplier(ship)
+	local speedDifference = #ship.velocity - ship.rotationEffectMultiplierOptimumSpeed
+	local range, lowest
+	if speedDifference > 0 then
+		range = ship.rotationEffectMultiplierFalloffRangeAbove
+		lowest = ship.lowestRotationEffectMultiplierAbove
+	else
+		range = ship.rotationEffectMultiplierFalloffRangeBelow
+		lowest = ship.lowestRotationEffectMultiplierBelow
+	end
+	local speedDistance = math.abs(speedDifference)
+	if range == 0 then
+		-- Avoid dividing by zero
+		return speedDistance <= range and 1 or lowest
+	end
+	return math.max(lowest, math.min(1,
+		(lowest - 1) *  speedDistance / range + 1
+	))
+end
 
 function love.load()
 	sphereMesh = loadObj("meshes/icosahedron.obj").mesh
@@ -63,6 +83,8 @@ function love.load()
 		angularForce = 2e4,
 		maxAngularSpeed = 1,
 		angularMovementTypeLerpFactor = 0.5,
+		angularPassiveDecelerationForceAboveMaxAngularSpeed = 2.5e4,
+		angularPerpendicularDecelerationForceAboveMaxAngularSpeed = 10e4,
 
 		rotationEffectMultiplierOptimumSpeed = 125,
 		lowestRotationEffectMultiplierBelow = 0.25,
@@ -104,6 +126,11 @@ function love.update(dt)
 		mouseDy = 0
 	end
 
+	-- Handle temporary frame variables and such
+	for _, ship in ipairs(ships) do
+		ship.currentRotationEffectMultiplier = ship.currentRotationEffectMultiplier or getTargetRotationEffectMultiplier(ship)
+	end
+
 	if player then
 		-- Get inputs
 		local keyboardTranslation = vec3()
@@ -133,7 +160,10 @@ function love.update(dt)
 		if love.keyboard.isDown(controls.pitchDown) then keyboardRotation = keyboardRotation + consts.rightVector end
 		if love.keyboard.isDown(controls.rollClockwise) then keyboardRotation = keyboardRotation - consts.forwardVector end
 		if love.keyboard.isDown(controls.rollAnticlockwise) then keyboardRotation = keyboardRotation + consts.forwardVector end
-		player.targetAngularVelocityMultiplierVector = limitVectorLength(normaliseOrZero(keyboardRotation) + player.rotationInputCursor, 1)
+		local targetAngularVelocityMultiplierVector = limitVectorLength(normaliseOrZero(keyboardRotation) + player.rotationInputCursor, 1)
+		local effectiveMaxAngularSpeed = player.currentRotationEffectMultiplier * player.maxAngularSpeed
+		local inputMaxSpeed = math.max(effectiveMaxAngularSpeed, #player.angularVelocity) -- Defines what target speed a targetAngularVelocityMultiplierVector magnitude of 1 means. Can be an arbitrary number
+		player.targetAngularVelocity = targetAngularVelocityMultiplierVector * inputMaxSpeed
 
 		player.brakeMultiplier = love.keyboard.isDown(controls.brake) and 1 or 0
 		player.sidewaysBrakeMultiplier = love.keyboard.isDown(controls.sidewaysBrake) and 1 or 0
@@ -232,27 +262,24 @@ function love.update(dt)
 		ship.velocity = finalNewVelocity
 
 		-- Rotaion
-		-- Get target effect multiplier
-		local speedDifference = #ship.velocity - ship.rotationEffectMultiplierOptimumSpeed
-		local range, lowest
-		if speedDifference > 0 then
-			range = ship.rotationEffectMultiplierFalloffRangeAbove
-			lowest = ship.lowestRotationEffectMultiplierAbove
-		else
-			range = ship.rotationEffectMultiplierFalloffRangeBelow
-			lowest = ship.lowestRotationEffectMultiplierBelow
-		end
-		local speedDistance = math.abs(speedDifference)
-		local targetRotationEffectMultiplier
-		if range == 0 then
-			-- Avoid dividing by zero
-			targetRotationEffectMultiplier = speedDistance <= range and 1 or lowest
-		else
-			targetRotationEffectMultiplier = math.max(lowest, math.min(1,
-				(lowest - 1) *  speedDistance / range + 1
-			))
-		end
-		-- Move current effect multiplier to target
+		-- Use current rotation effect multiplier
+		local effectiveMaxAngularSpeed = ship.maxAngularSpeed * ship.currentRotationEffectMultiplier
+		local effectiveAngularForce = ship.angularForce * ship.currentRotationEffectMultiplier
+		-- Move angular velocity vector using effect multiplier on affected ship stats
+		ship.angularVelocity = handleVelocityVector(
+			ship.angularVelocity,
+			ship.targetAngularVelocity,
+			effectiveAngularForce / ship.mass,
+			dt,
+			ship.angularMovementTypeLerpFactor,
+			effectiveMaxAngularSpeed,
+			ship.angularPassiveDecelerationForceAboveMaxAngularSpeed / ship.mass,
+			ship.angularPerpendicularDecelerationForceAboveMaxAngularSpeed / ship.mass
+		)
+		-- Move current effect multiplier to target.
+		-- This is done after current effect multiplier is used because current is also used to make targetAngularVelocity before in the same update,
+		-- and they should use the same value. Could also move current rotation effect multiplier change to before that.
+		local targetRotationEffectMultiplier = getTargetRotationEffectMultiplier(ship)
 		if ship.rotationEffectMultiplierBaseChangeRate then
 			ship.currentRotationEffectMultiplier = ship.currentRotationEffectMultiplier or targetRotationEffectMultiplier -- Sensible default
 			local delta = targetRotationEffectMultiplier - ship.currentRotationEffectMultiplier
@@ -267,17 +294,6 @@ function love.update(dt)
 		else
 			ship.currentRotationEffectMultiplier = targetRotationEffectMultiplier
 		end
-		-- Multiply affected ship stats by current effect multiplier
-		local effectiveMaxAngularSpeed = ship.maxAngularSpeed * ship.currentRotationEffectMultiplier
-		local effectiveAngularForce = ship.angularForce * ship.currentRotationEffectMultiplier
-		-- Move angular velocity vector using effect multiplier on affected ship stats
-		ship.angularVelocity = moveVectorToTarget2(
-			ship.angularVelocity,
-			ship.targetAngularVelocityMultiplierVector * effectiveMaxAngularSpeed,
-			effectiveAngularForce / ship.mass,
-			dt,
-			ship.angularMovementTypeLerpFactor
-		)
 	end
 
 	for _, ship in ipairs(ships) do
