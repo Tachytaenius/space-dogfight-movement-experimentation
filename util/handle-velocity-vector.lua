@@ -15,9 +15,6 @@ local axisAngleVectorBetweenVectors = require("util.axis-angle-between-vectors")
 -- This works fine for both linear and angular velocity vectors.
 -- Note that "move" is used to mean both moving the vector and the movement the vector represents.
 
--- TODO: Replace perpendicular move decel thing with, possibly, something that lets > max speed vectors, when changing direction, move in some shape that touches the max speed circle opposite to the current direction and extends out to touch the current direction at a vertex or something. I was thinking ellipse but I'm not sure at all that a shape that satisfies this will always be an ellipse, if one exists in the first place
--- There are more TODOs in here.
-
 return function(
 	current,
 	target,
@@ -36,9 +33,8 @@ return function(
 		current = vec3.clone(target)
 		jumped = true
 	end
-	-- Decelerate if over max speed (whether we jumped or not)
-	-- TODO: Justify order or reorder or whatever
-	-- TODO: Could this be merged with the deceleration below? Mind the right side of the and in that if statement.
+	-- Decelerate if over max speed (whether we jumped or not).
+	-- This was placed here after certain ordering didn't work, possibly this could be rearranged and refactored.
 	if #current > maxSpeed then
 		current = setVectorLength( -- Relies on use of normaliseOrZero
 			current,
@@ -77,7 +73,6 @@ return function(
 
 			-- Move current in the movement direction but don't go above max speed, or current speed if higher.
 			-- You shouldn't be able to go above max speed, but if you have, then you should be able to maintain your current speed but go no higher.
-			-- TODO: Multiply it down like with linear motion because precision might make it go higher?
 			current = limitVectorLength(
 				current + moveDirection * rate * dt,
 				math.max(maxSpeed, #current)

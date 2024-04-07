@@ -1,5 +1,4 @@
 -- TODO: Angular drag with consistent units. Implement a more sensible idea of angular force, too?
--- TODO: Smooth out rotation effect multiplier for better feel
 -- TODO: Automatic forward thrust with throttle
 
 local mathsies = require("lib.mathsies")
